@@ -25,7 +25,6 @@
 #include "behaviortree_ros2/tree_execution_server.hpp"
 #include "behaviortree_ros2/bt_utils.hpp"
 
-#include "behaviortree_cpp/loggers/groot2_publisher.h"
 
 namespace
 {
@@ -38,20 +37,15 @@ namespace BT
 struct TreeExecutionServer::Pimpl
 {
   rclcpp_action::Server<ExecuteTree>::SharedPtr action_server;
-  std::thread action_thread;
 
+  // TODO: give each goal it's own parameters?
   std::shared_ptr<bt_server::ParamListener> param_listener;
   bt_server::Params params;
 
   BT::BehaviorTreeFactory factory;
-  std::shared_ptr<BT::Groot2Publisher> groot_publisher;
-
-  std::string tree_name;
-  std::string payload;
-  BT::Tree tree;
-  BT::Blackboard::Ptr global_blackboard;
   bool factory_initialized_ = false;
 
+  std::shared_ptr<BT::Groot2Publisher> groot_publisher;
   rclcpp::WallTimer<rclcpp::VoidCallbackType>::SharedPtr single_shot_timer;
 };
 
@@ -60,7 +54,6 @@ TreeExecutionServer::TreeExecutionServer(const rclcpp::Node::SharedPtr& node)
 {
   p_->param_listener = std::make_shared<bt_server::ParamListener>(node_);
   p_->params = p_->param_listener->get_params();
-  p_->global_blackboard = BT::Blackboard::create();
 
   // create the action server
   const auto action_name = p_->params.action_name;
@@ -143,7 +136,7 @@ rclcpp_action::CancelResponse TreeExecutionServer::handle_cancel(
   if(!goal_handle->is_active())
   {
     RCLCPP_WARN(kLogger, "Rejecting request to cancel goal because the server is not "
-                         "processing one.");
+                         "processing the goal.");
     return rclcpp_action::CancelResponse::REJECT;
   }
   return rclcpp_action::CancelResponse::ACCEPT;
@@ -152,18 +145,16 @@ rclcpp_action::CancelResponse TreeExecutionServer::handle_cancel(
 void TreeExecutionServer::handle_accepted(
     const std::shared_ptr<GoalHandleExecuteTree> goal_handle)
 {
-  // Join the previous execute thread before replacing it with a new one
-  if(p_->action_thread.joinable())
-  {
-    p_->action_thread.join();
-  }
-  // To avoid blocking the executor start a new thread to process the goal
-  p_->action_thread = std::thread{ [=]() { execute(goal_handle); } };
+  std::thread{ [=]() { execute(goal_handle); } }.detach();
 }
 
 void TreeExecutionServer::execute(
     const std::shared_ptr<GoalHandleExecuteTree> goal_handle)
 {
+  GoalResources session;
+  session.global_blackboard = BT::Blackboard::create();
+
+
   const auto goal = goal_handle->get_goal();
   BT::NodeStatus status = BT::NodeStatus::RUNNING;
   auto action_result = std::make_shared<ExecuteTree::Result>();
@@ -178,17 +169,17 @@ void TreeExecutionServer::execute(
   try
   {
     // This blackboard will be owned by "MainTree". It parent is p_->global_blackboard
-    auto root_blackboard = BT::Blackboard::create(p_->global_blackboard);
+    auto root_blackboard = BT::Blackboard::create(session.global_blackboard);
 
-    p_->tree = p_->factory.createTree(goal->target_tree, root_blackboard);
-    p_->tree_name = goal->target_tree;
-    p_->payload = goal->payload;
+    session.tree = p_->factory.createTree(goal->target_tree, root_blackboard);
+    session.tree_name = goal->target_tree;
+    session.payload = goal->payload;
 
     // call user defined function after the tree has been created
-    onTreeCreated(p_->tree);
+    onTreeCreated(session);
     p_->groot_publisher.reset();
     p_->groot_publisher =
-        std::make_shared<BT::Groot2Publisher>(p_->tree, p_->params.groot2_port);
+        std::make_shared<BT::Groot2Publisher>(session.tree, p_->params.groot2_port);
 
     // Loop until the tree is done or a cancel is requested
     const auto period =
@@ -197,12 +188,12 @@ void TreeExecutionServer::execute(
 
     // operations to be done if the tree execution is aborted, either by
     // cancel requested or by onLoopAfterTick()
-    auto stop_action = [this, &action_result](BT::NodeStatus status,
+    auto stop_action = [this, &action_result, &session](BT::NodeStatus status,
                                               const std::string& message) {
-      p_->tree.haltTree();
+      session.tree.haltTree();
       action_result->node_status = ConvertNodeStatus(status);
       // override the message value if the user defined function returns it
-      if(auto msg = onTreeExecutionCompleted(status, true))
+      if(auto msg = onTreeExecutionCompleted(status, true, session))
       {
         action_result->return_message = msg.value();
       }
@@ -223,16 +214,16 @@ void TreeExecutionServer::execute(
       }
 
       // tick the tree once and publish the action feedback
-      status = p_->tree.tickExactlyOnce();
+      status = session.tree.tickExactlyOnce();
 
-      if(const auto res = onLoopAfterTick(status); res.has_value())
+      if(const auto res = onLoopAfterTick(status, session); res.has_value())
       {
         stop_action(res.value(), "Action Server aborted by onLoopAfterTick()");
         goal_handle->abort(action_result);
         return;
       }
 
-      if(const auto res = onLoopFeedback(); res.has_value())
+      if(const auto res = onLoopFeedback(session); res.has_value())
       {
         auto feedback = std::make_shared<ExecuteTree::Feedback>();
         feedback->message = res.value();
@@ -242,7 +233,7 @@ void TreeExecutionServer::execute(
       const auto now = std::chrono::steady_clock::now();
       if(now < loop_deadline)
       {
-        p_->tree.sleep(std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        session.tree.sleep(std::chrono::duration_cast<std::chrono::system_clock::duration>(
             loop_deadline - now));
       }
       loop_deadline += period;
@@ -258,7 +249,7 @@ void TreeExecutionServer::execute(
 
   // Call user defined onTreeExecutionCompleted function.
   // Override the message value if the user defined function returns it
-  if(auto msg = onTreeExecutionCompleted(status, false))
+  if(auto msg = onTreeExecutionCompleted(status, false, session))
   {
     action_result->return_message = msg.value();
   }
@@ -284,24 +275,24 @@ void TreeExecutionServer::execute(
   }
 }
 
-const std::string& TreeExecutionServer::treeName() const
+const std::string& TreeExecutionServer::treeName(GoalResources& session) const
 {
-  return p_->tree_name;
+  return session.tree_name;
 }
 
-const std::string& TreeExecutionServer::goalPayload() const
+const std::string& TreeExecutionServer::goalPayload(GoalResources& session) const
 {
-  return p_->payload;
+  return session.payload;
 }
 
-const BT::Tree& TreeExecutionServer::tree() const
+const BT::Tree& TreeExecutionServer::tree(GoalResources& session) const
 {
-  return p_->tree;
+  return session.tree;
 }
 
-BT::Blackboard::Ptr TreeExecutionServer::globalBlackboard()
+BT::Blackboard::Ptr TreeExecutionServer::globalBlackboard(GoalResources& session)
 {
-  return p_->global_blackboard;
+  return session.global_blackboard;
 }
 
 BT::BehaviorTreeFactory& TreeExecutionServer::factory()

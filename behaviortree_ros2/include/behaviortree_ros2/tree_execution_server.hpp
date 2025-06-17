@@ -13,16 +13,48 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 #include "btcpp_ros2_interfaces/action/execute_tree.hpp"
 
 #include "behaviortree_cpp/bt_factory.h"
+#include "behaviortree_cpp/loggers/groot2_publisher.h"
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
 namespace BT
 {
+
+/**
+ * @brief Resources shared by one goal
+ *
+ */
+struct GoalResources
+{
+  /**
+   * @brief The name of the root tree being ticked
+   */
+  std::string tree_name;
+
+  /**
+   * @brief An optional, implementation-dependent payload for the target tree
+   */
+  std::string payload;
+
+  /**
+   * @brief The tree being ticked
+   */
+  BT::Tree tree;
+
+  /**
+   * @brief A global blackboard used for handling this goal.
+   *
+   * TODO: make this global between all goals handled by the server?
+   */
+  BT::Blackboard::Ptr global_blackboard;
+};
+
 
 /**
  * @brief TreeExecutionServer class hosts a ROS Action Server that is able
@@ -61,18 +93,18 @@ public:
   rclcpp::Node::SharedPtr node();
 
   /// @brief Name of the tree being executed
-  const std::string& treeName() const;
+  const std::string& treeName(GoalResources& session) const;
 
   /// @brief The payload received in the last goal
-  const std::string& goalPayload() const;
+  const std::string& goalPayload(GoalResources& session) const;
 
   /// @brief Tree being executed.
-  const BT::Tree& tree() const;
+  const BT::Tree& tree(GoalResources& session) const;
 
   /// @brief Pointer to the global blackboard
-  BT::Blackboard::Ptr globalBlackboard();
+  BT::Blackboard::Ptr globalBlackboard(GoalResources& session);
 
-  /// @brief Pointer to the global blackboard
+  /// @brief Pointer to the factory
   BT::BehaviorTreeFactory& factory();
 
 protected:
@@ -89,9 +121,9 @@ protected:
    * @brief Callback invoked after the tree is created.
    * It can be used, for instance, to initialize a logger or the global blackboard.
    *
-   * @param tree The tree that was created
+   * @param session The session resources specific to the goal
   */
-  virtual void onTreeCreated(BT::Tree& tree)
+  virtual void onTreeCreated(GoalResources& session)
   {}
 
   /**
@@ -110,8 +142,9 @@ protected:
    * Return std::nullopt to continue the execution.
    *
    * @param status The status of the tree after the last tick
+   * @param session The session resources specific to the goal
   */
-  virtual std::optional<BT::NodeStatus> onLoopAfterTick(BT::NodeStatus status)
+  virtual std::optional<BT::NodeStatus> onLoopAfterTick(BT::NodeStatus status, GoalResources& session)
   {
     return std::nullopt;
   }
@@ -122,11 +155,13 @@ protected:
    *
    * @param status The status of the tree after the last tick
    * @param was_cancelled True if the action was cancelled by the Action Client
+   * @param session The session resources specific to the goal
    *
    * @return if not std::nullopt, the string will be sent as [return_message] to the Action Client.
   */
   virtual std::optional<std::string> onTreeExecutionCompleted(BT::NodeStatus status,
-                                                              bool was_cancelled)
+                                                              bool was_cancelled,
+                                                              GoalResources& session)
   {
     return std::nullopt;
   }
@@ -135,9 +170,11 @@ protected:
    * @brief onLoopFeedback is a callback invoked at each loop, after tree.tickOnce().
    * If it returns a valid string, it will be sent as feedback to the Action Client.
    *
+   * @param session The session resources specific to the goal
+   *
    * If you don't want to return any feedback, return std::nullopt.
   */
-  virtual std::optional<std::string> onLoopFeedback()
+  virtual std::optional<std::string> onLoopFeedback(GoalResources& session)
   {
     return std::nullopt;
   }
