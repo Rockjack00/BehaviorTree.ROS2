@@ -14,11 +14,6 @@
 #include "behaviortree_ros2/bt_utils.hpp"
 #include "behaviortree_ros2/plugins.hpp"
 
-namespace
-{
-static const auto kLogger = rclcpp::get_logger("bt_action_server");
-}
-
 namespace BT
 {
 
@@ -47,13 +42,14 @@ btcpp_ros2_interfaces::msg::NodeStatus ConvertNodeStatus(BT::NodeStatus& status)
   return action_status;
 }
 
-std::string GetDirectoryPath(const std::string& parameter_value)
+std::string GetDirectoryPath(const std::string& parameter_value, 
+                             rclcpp::Logger logger)
 {
   std::string package_name, subfolder;
   auto pos = parameter_value.find_first_of("/");
   if(pos == parameter_value.size())
   {
-    RCLCPP_ERROR(kLogger, "Invalid Parameter: %s. Missing subfolder delimiter '/'.",
+    RCLCPP_ERROR(logger, "Invalid Parameter: %s. Missing subfolder delimiter '/'.",
                  parameter_value.c_str());
     return "";
   }
@@ -64,20 +60,21 @@ std::string GetDirectoryPath(const std::string& parameter_value)
   {
     std::string search_directory =
         ament_index_cpp::get_package_share_directory(package_name) + "/" + subfolder;
-    RCLCPP_DEBUG(kLogger, "Searching for Plugins/BehaviorTrees in path: %s",
+    RCLCPP_DEBUG(logger, "Searching for Plugins/BehaviorTrees in path: %s",
                  search_directory.c_str());
     return search_directory;
   }
   catch(const std::exception& e)
   {
-    RCLCPP_ERROR(kLogger, "Failed to find package: %s \n %s", package_name.c_str(),
+    RCLCPP_ERROR(logger, "Failed to find package: %s \n %s", package_name.c_str(),
                  e.what());
   }
   return "";
 }
 
 void LoadBehaviorTrees(BT::BehaviorTreeFactory& factory,
-                       const std::string& directory_path)
+                       const std::string& directory_path,
+                       rclcpp::Logger logger)
 {
   using std::filesystem::directory_iterator;
   for(const auto& entry : directory_iterator(directory_path))
@@ -87,11 +84,11 @@ void LoadBehaviorTrees(BT::BehaviorTreeFactory& factory,
       try
       {
         factory.registerBehaviorTreeFromFile(entry.path().string());
-        RCLCPP_INFO(kLogger, "Loaded BehaviorTree: %s", entry.path().filename().c_str());
+        RCLCPP_INFO(logger, "Loaded BehaviorTree: %s", entry.path().filename().c_str());
       }
       catch(const std::exception& e)
       {
-        RCLCPP_ERROR(kLogger, "Failed to load BehaviorTree: %s \n %s",
+        RCLCPP_ERROR(logger, "Failed to load BehaviorTree: %s \n %s",
                      entry.path().filename().c_str(), e.what());
       }
     }
@@ -99,7 +96,8 @@ void LoadBehaviorTrees(BT::BehaviorTreeFactory& factory,
 }
 
 void LoadPlugin(BT::BehaviorTreeFactory& factory, const std::filesystem::path& file_path,
-                BT::RosNodeParams params)
+                BT::RosNodeParams params,
+                rclcpp::Logger logger)
 {
   const auto filename = file_path.filename();
   try
@@ -119,14 +117,14 @@ void LoadPlugin(BT::BehaviorTreeFactory& factory, const std::filesystem::path& f
     }
     else
     {
-      RCLCPP_ERROR(kLogger, "Failed to load Plugin from file: %s.", filename.c_str());
+      RCLCPP_ERROR(logger, "Failed to load Plugin from file: %s.", filename.c_str());
       return;
     }
-    RCLCPP_INFO(kLogger, "Loaded ROS Plugin: %s", filename.c_str());
+    RCLCPP_INFO(logger, "Loaded ROS Plugin: %s", filename.c_str());
   }
   catch(const std::exception& ex)
   {
-    RCLCPP_ERROR(kLogger, "Failed to load ROS Plugin: %s \n %s", filename.c_str(),
+    RCLCPP_ERROR(logger, "Failed to load ROS Plugin: %s \n %s", filename.c_str(),
                  ex.what());
   }
 }
@@ -141,7 +139,7 @@ void RegisterPlugins(bt_server::Params& params, BT::BehaviorTreeFactory& factory
 
   for(const auto& plugin : params.plugins)
   {
-    const auto plugin_directory = GetDirectoryPath(plugin);
+    const auto plugin_directory = GetDirectoryPath(plugin, node->get_logger());
     // skip invalid plugins directories
     if(plugin_directory.empty())
     {
@@ -153,7 +151,7 @@ void RegisterPlugins(bt_server::Params& params, BT::BehaviorTreeFactory& factory
     {
       if(entry.path().extension() == ".so")
       {
-        LoadPlugin(factory, entry.path(), ros_params);
+        LoadPlugin(factory, entry.path(), ros_params, node->get_logger());
       }
     }
   }
@@ -164,11 +162,11 @@ void RegisterBehaviorTrees(bt_server::Params& params, BT::BehaviorTreeFactory& f
 {
   for(const auto& tree_dir : params.behavior_trees)
   {
-    const auto tree_directory = GetDirectoryPath(tree_dir);
+    const auto tree_directory = GetDirectoryPath(tree_dir, node->get_logger());
     // skip invalid subtree directories
     if(tree_directory.empty())
       continue;
-    LoadBehaviorTrees(factory, tree_directory);
+    LoadBehaviorTrees(factory, tree_directory, node->get_logger());
   }
 }
 

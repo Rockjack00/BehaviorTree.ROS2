@@ -27,6 +27,11 @@
 #include "rclcpp/rclcpp.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+namespace
+{
+static const auto kLogger = rclcpp::get_logger("bt_action_server");
+}
+
 namespace BT
 {
 /**
@@ -43,7 +48,8 @@ btcpp_ros2_interfaces::msg::NodeStatus ConvertNodeStatus(BT::NodeStatus& status)
  * @param parameter_value String containing 'package_name/subfolder' for the directory path to look up
  * @return Full path to the directory specified by the parameter_value
  */
-std::string GetDirectoryPath(const std::string& parameter_value);
+std::string GetDirectoryPath(const std::string& parameter_value, 
+                             rclcpp::Logger logger = kLogger);
 
 /**
  * @brief Function to load BehaviorTree xml files from a specific directory
@@ -52,7 +58,8 @@ std::string GetDirectoryPath(const std::string& parameter_value);
  * @param directory_path Full path to the directory to search for BehaviorTree definitions
  */
 void LoadBehaviorTrees(BT::BehaviorTreeFactory& factory,
-                       const std::string& directory_path);
+                       const std::string& directory_path, 
+                       rclcpp::Logger logger = kLogger);
 
 /**
  * @brief Function to load a BehaviorTree ROS plugin (or standard BT.CPP plugins)
@@ -61,8 +68,10 @@ void LoadBehaviorTrees(BT::BehaviorTreeFactory& factory,
  * @param file_path Full path to the directory to search for BehaviorTree plugin
  * @param params parameters passed to the ROS plugin
  */
-void LoadPlugin(BT::BehaviorTreeFactory& factory, const std::filesystem::path& file_path,
-                BT::RosNodeParams params);
+void LoadPlugin(BT::BehaviorTreeFactory& factory, 
+                const std::filesystem::path& file_path,
+                BT::RosNodeParams params, 
+                rclcpp::Logger logger = kLogger);
 
 /** @brief Function to load all plugins from the specified package
  *

@@ -26,11 +26,6 @@
 #include "behaviortree_ros2/bt_utils.hpp"
 
 
-namespace
-{
-static const auto kLogger = rclcpp::get_logger("bt_action_server");
-}
-
 namespace BT
 {
 
@@ -57,7 +52,7 @@ TreeExecutionServer::TreeExecutionServer(const rclcpp::Node::SharedPtr& node)
 
   // create the action server
   const auto action_name = p_->params.action_name;
-  RCLCPP_INFO(kLogger, "Starting Action Server: %s", action_name.c_str());
+  RCLCPP_INFO(node_->get_logger(), "Starting Action Server: %s", action_name.c_str());
   p_->action_server = rclcpp_action::create_server<ExecuteTree>(
       node_, action_name,
       [this](const rclcpp_action::GoalUUID& uuid,
@@ -119,7 +114,7 @@ rclcpp_action::GoalResponse
 TreeExecutionServer::handle_goal(const rclcpp_action::GoalUUID& /* uuid */,
                                  std::shared_ptr<const ExecuteTree::Goal> goal)
 {
-  RCLCPP_INFO(kLogger, "Received goal request to execute Behavior Tree: %s",
+  RCLCPP_INFO(node_->get_logger(), "Received goal request to execute Behavior Tree: %s",
               goal->target_tree.c_str());
 
   if(!onGoalReceived(goal->target_tree, goal->payload))
@@ -132,10 +127,10 @@ TreeExecutionServer::handle_goal(const rclcpp_action::GoalUUID& /* uuid */,
 rclcpp_action::CancelResponse TreeExecutionServer::handle_cancel(
     const std::shared_ptr<GoalHandleExecuteTree> goal_handle)
 {
-  RCLCPP_INFO(kLogger, "Received request to cancel goal");
+  RCLCPP_INFO(node_->get_logger(), "Received request to cancel goal");
   if(!goal_handle->is_active())
   {
-    RCLCPP_WARN(kLogger, "Rejecting request to cancel goal because the server is not "
+    RCLCPP_WARN(node_->get_logger(), "Rejecting request to cancel goal because the server is not "
                          "processing the goal.");
     return rclcpp_action::CancelResponse::REJECT;
   }
@@ -201,7 +196,7 @@ void TreeExecutionServer::execute(
       {
         action_result->return_message = message;
       }
-      RCLCPP_WARN(kLogger, action_result->return_message.c_str());
+      RCLCPP_WARN(node_->get_logger(), action_result->return_message.c_str());
     };
 
     while(rclcpp::ok() && status == BT::NodeStatus::RUNNING)
@@ -242,7 +237,7 @@ void TreeExecutionServer::execute(
   catch(const std::exception& ex)
   {
     action_result->return_message = std::string("Behavior Tree exception:") + ex.what();
-    RCLCPP_ERROR(kLogger, action_result->return_message.c_str());
+    RCLCPP_ERROR(node_->get_logger(), action_result->return_message.c_str());
     goal_handle->abort(action_result);
     return;
   }
@@ -265,12 +260,12 @@ void TreeExecutionServer::execute(
   // return success or aborted for the action result
   if(status == BT::NodeStatus::SUCCESS)
   {
-    RCLCPP_INFO(kLogger, action_result->return_message.c_str());
+    RCLCPP_INFO(node_->get_logger(), action_result->return_message.c_str());
     goal_handle->succeed(action_result);
   }
   else
   {
-    RCLCPP_ERROR(kLogger, action_result->return_message.c_str());
+    RCLCPP_ERROR(node_->get_logger(), action_result->return_message.c_str());
     goal_handle->abort(action_result);
   }
 }
