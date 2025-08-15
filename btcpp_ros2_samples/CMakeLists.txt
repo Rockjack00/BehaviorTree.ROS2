@@ -19,8 +19,8 @@ set(THIS_PACKAGE_DEPS
 
 ######################################################
 # Simple example showing how to use and customize the BtExecutionServer
-add_executable(sample_bt_executor src/sample_bt_executor.cpp)
-ament_target_dependencies(sample_bt_executor ${THIS_PACKAGE_DEPS})
+# add_executable(sample_bt_executor src/sample_bt_executor.cpp)
+# ament_target_dependencies(sample_bt_executor ${THIS_PACKAGE_DEPS})
 
 ######################################################
 # Build an Action Client that calls the sleep action (STATIC version)
@@ -69,7 +69,7 @@ install(TARGETS
   sleep_server
   sleep_plugin
   subscriber_test
-  sample_bt_executor
+  # sample_bt_executor
   bool_client
   bool_server
   DESTINATION lib/${PROJECT_NAME}
